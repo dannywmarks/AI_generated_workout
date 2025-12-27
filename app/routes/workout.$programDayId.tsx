@@ -33,7 +33,7 @@ type ProgramExercise = {
 };
 
 type SetState = {
-  reps: string; // keep as string for inputs
+  reps: string;
   weight: string;
   rir: string;
   notes: string;
@@ -44,10 +44,77 @@ function safeNum(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function Pill(props: { children: React.ReactNode }) {
+  return (
+    <div className="inline-flex items-center gap-2 rounded-full border border-emerald-900/60 bg-emerald-950/30 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-emerald-200/90 shadow-[0_0_0_1px_rgba(16,185,129,0.08)]">
+      <span className="h-2 w-2 rounded-full bg-emerald-300/70 shadow-[0_0_14px_rgba(52,211,153,0.55)]" />
+      {props.children}
+    </div>
+  );
+}
+
+function Panel(props: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="relative overflow-hidden rounded-2xl border border-emerald-900/40 bg-zinc-950/40 shadow-[0_0_0_1px_rgba(16,185,129,0.12),0_18px_60px_rgba(0,0,0,0.55)]">
+      <div className="pointer-events-none absolute inset-0 opacity-70">
+        <div className="absolute -left-24 -top-24 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="absolute -right-24 -bottom-24 h-64 w-64 rounded-full bg-emerald-500/10 blur-3xl" />
+      </div>
+
+      <div className="relative border-b border-emerald-900/30 bg-zinc-950/30 px-5 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="h-2.5 w-2.5 rounded-full bg-emerald-300/70 shadow-[0_0_14px_rgba(52,211,153,0.55)]" />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold tracking-wide text-zinc-100">
+                {props.title}
+              </div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-400">
+                STATUS: <span className="text-emerald-200/90">READY</span>
+              </div>
+            </div>
+          </div>
+          {props.right ? <div className="shrink-0">{props.right}</div> : null}
+        </div>
+      </div>
+
+      <div className="relative px-5 py-5">{props.children}</div>
+    </section>
+  );
+}
+
+function HudInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={[
+        "w-full rounded-xl border border-zinc-800/80 bg-zinc-950/50 px-3 py-2 text-sm text-zinc-100 outline-none",
+        "placeholder:text-zinc-600",
+        "focus:border-emerald-700/70 focus:ring-2 focus:ring-emerald-600/20",
+        props.className ?? "",
+      ].join(" ")}
+    />
+  );
+}
+
+function HudTextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      className={[
+        "w-full rounded-xl border border-zinc-800/80 bg-zinc-950/50 px-3 py-2 text-sm text-zinc-100 outline-none",
+        "placeholder:text-zinc-600",
+        "focus:border-emerald-700/70 focus:ring-2 focus:ring-emerald-600/20",
+        props.className ?? "",
+      ].join(" ")}
+    />
+  );
+}
+
 export default function WorkoutRoute() {
   const navigate = useNavigate();
   const params = useParams();
-  const programDayId = params.programDayId; // ✅ must match your route param
+  const programDayId = params.programDayId;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -91,7 +158,6 @@ export default function WorkoutRoute() {
         }
         setProgram(active);
 
-        // 1) Load program exercises for this day
         const exRes = await databases.listDocuments(DB_ID, COL_PROGRAM_EXERCISES, [
           Query.equal("programDayId", programDayId),
           Query.orderAsc("orderIndex"),
@@ -101,7 +167,6 @@ export default function WorkoutRoute() {
         const exs = (exRes.documents as any) as ProgramExercise[];
         setExercises(exs);
 
-        // 2) Create-or-load workout log (one per day/date)
         const log = await getOrCreateWorkoutLog({
           programId: active.$id,
           programDayId,
@@ -110,10 +175,8 @@ export default function WorkoutRoute() {
         setWorkoutLogId(log.$id);
         setWorkoutNotes((log as any)?.notes ?? "");
 
-        // 3) Prefill set state from existing set logs (if user revisits)
         const existingSets = await listSetLogs(log.$id);
 
-        // build default state
         const next: Record<string, SetState[]> = {};
         for (const ex of exs) {
           const rows: SetState[] = [];
@@ -159,10 +222,8 @@ export default function WorkoutRoute() {
     setSaving(true);
 
     try {
-      // save notes first
       await updateWorkoutLog(workoutLogId, { notes: workoutNotes });
 
-      // flatten set payload
       const payload: Array<{
         programExerciseId: string;
         setNumber: number;
@@ -187,7 +248,6 @@ export default function WorkoutRoute() {
       }
 
       await upsertSetLogs({ workoutLogId, sets: payload });
-
       setSaving(false);
     } catch (e: any) {
       console.error("[workout save] error:", e);
@@ -223,98 +283,111 @@ export default function WorkoutRoute() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      <div className="mx-auto max-w-4xl px-6 py-10">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold">Workout Log</h1>
-            <p className="mt-1 text-sm text-zinc-300">
-              {program ? `Program: ${program.templateKey}` : ""}
-              {totalSets ? ` • ${totalSets} total sets` : ""}
-            </p>
-          </div>
+    <main className="relative min-h-screen bg-zinc-950 text-zinc-100">
+      {/* scanlines */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 opacity-[0.08]"
+        style={{
+          backgroundImage:
+            "repeating-linear-gradient(to bottom, rgba(255,255,255,0.18), rgba(255,255,255,0.18) 1px, transparent 1px, transparent 4px)",
+        }}
+      />
 
-          <div className="flex gap-2">
-            <Link
-              to="/today"
-              className="rounded-lg border border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-900"
-            >
-              Back
-            </Link>
+      <div className="relative mx-auto max-w-4xl px-6 py-10">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <Pill>WORKOUT_CONSOLE // DAMAGE PLAN</Pill>
+          <Link
+            to="/today"
+            className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-200 hover:bg-zinc-900/40"
+          >
+            BACK TO TODAY
+          </Link>
+        </div>
+
+        <div className="mb-4">
+          <div className="text-3xl font-extrabold tracking-tight text-emerald-200">WORKOUT LOG</div>
+          <div className="mt-2 text-sm text-zinc-300">
+            {program ? `Program: ${program.templateKey}` : ""}
+            {totalSets ? ` • ${totalSets} total sets` : ""}
           </div>
         </div>
 
         {error ? (
-          <div className="mt-6 rounded-lg border border-red-900 bg-red-950/40 p-4 text-sm text-red-200">
+          <div className="mb-6 rounded-2xl border border-red-900/60 bg-red-950/30 p-5 text-sm text-red-200">
             {error}
           </div>
         ) : null}
 
-        <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <Panel
+          title="WORKOUT_NOTES"
+          right={
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={saving || finishing}
+                className="rounded-xl border border-emerald-900/50 bg-emerald-950/30 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.14)] hover:bg-emerald-950/45 disabled:opacity-60"
+              >
+                {saving ? "SAVING…" : "SAVE CHECKPOINT"}
+              </button>
+
+              <button
+                type="button"
+                onClick={onFinish}
+                disabled={saving || finishing}
+                className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-zinc-200 hover:bg-zinc-900/40 disabled:opacity-60"
+              >
+                {finishing ? "FINISHING…" : "COMPLETE RUN"}
+              </button>
+            </div>
+          }
+        >
           <label className="block">
-            <span className="text-sm text-zinc-300">Workout notes</span>
-            <textarea
-              className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm outline-none focus:border-emerald-600"
+            <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-400">
+              NOTES
+            </div>
+            <HudTextArea
               rows={3}
               value={workoutNotes}
               onChange={(e) => setWorkoutNotes(e.target.value)}
               placeholder="How did it feel? Any pain? Any PRs?"
+              className="mt-2"
             />
           </label>
 
-          <div className="mt-4 flex gap-2">
-            <button
-              type="button"
-              onClick={onSave}
-              disabled={saving || finishing}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500 disabled:opacity-60"
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
-
-            <button
-              type="button"
-              onClick={onFinish}
-              disabled={saving || finishing}
-              className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900 disabled:opacity-60"
-            >
-              {finishing ? "Finishing…" : "Finish workout"}
-            </button>
+          <div className="mt-4 text-xs text-zinc-500">
+            Tip: log honest RIR. The goal is repeatable progress, not ego numbers.
           </div>
-        </div>
+        </Panel>
 
-        <div className="mt-8 space-y-4">
+        <div className="mt-6 space-y-4">
           {exercises.map((ex) => (
-            <div key={ex.$id} className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-base font-semibold">{ex.name}</h2>
-                  <p className="mt-1 text-xs text-zinc-400">
-                    {ex.sets} sets • {ex.repMin}–{ex.repMax} reps • target RIR {ex.rirTarget}
-                    {ex.notes ? ` • ${ex.notes}` : ""}
-                  </p>
-                </div>
+            <Panel key={ex.$id} title={ex.name}>
+              <div className="mb-4 text-xs text-zinc-400">
+                {ex.sets} sets • {ex.repMin}–{ex.repMax} reps • target RIR {ex.rirTarget}
+                {ex.notes ? ` • ${ex.notes}` : ""}
               </div>
 
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[640px] text-left text-sm">
-                  <thead className="text-xs text-zinc-400">
+              <div className="overflow-x-auto rounded-xl border border-zinc-800/70 bg-zinc-950/30">
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <thead className="bg-zinc-950/40 text-[11px] uppercase tracking-[0.22em] text-zinc-400">
                     <tr>
-                      <th className="py-2 pr-2">Set</th>
-                      <th className="py-2 pr-2">Weight</th>
-                      <th className="py-2 pr-2">Reps</th>
-                      <th className="py-2 pr-2">RIR</th>
-                      <th className="py-2 pr-2">Notes</th>
+                      <th className="px-4 py-3">Set</th>
+                      <th className="px-4 py-3">Weight</th>
+                      <th className="px-4 py-3">Reps</th>
+                      <th className="px-4 py-3">RIR</th>
+                      <th className="px-4 py-3">Notes</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="text-zinc-200">
                     {(setsByExercise[ex.$id] ?? []).map((row, idx) => (
-                      <tr key={idx} className="border-t border-zinc-800">
-                        <td className="py-2 pr-2 text-zinc-300">{idx + 1}</td>
+                      <tr key={idx} className="border-t border-zinc-800/70">
+                        <td className="px-4 py-3 text-zinc-300">{idx + 1}</td>
 
-                        <td className="py-2 pr-2">
-                          <input
-                            className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 outline-none focus:border-emerald-600"
+                        <td className="px-4 py-3">
+                          <HudInput
+                            className="w-28"
                             value={row.weight}
                             onChange={(e) => updateSet(ex.$id, idx, { weight: e.target.value })}
                             inputMode="decimal"
@@ -322,9 +395,9 @@ export default function WorkoutRoute() {
                           />
                         </td>
 
-                        <td className="py-2 pr-2">
-                          <input
-                            className="w-20 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 outline-none focus:border-emerald-600"
+                        <td className="px-4 py-3">
+                          <HudInput
+                            className="w-24"
                             value={row.reps}
                             onChange={(e) => updateSet(ex.$id, idx, { reps: e.target.value })}
                             inputMode="numeric"
@@ -332,9 +405,9 @@ export default function WorkoutRoute() {
                           />
                         </td>
 
-                        <td className="py-2 pr-2">
-                          <input
-                            className="w-20 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 outline-none focus:border-emerald-600"
+                        <td className="px-4 py-3">
+                          <HudInput
+                            className="w-24"
                             value={row.rir}
                             onChange={(e) => updateSet(ex.$id, idx, { rir: e.target.value })}
                             inputMode="numeric"
@@ -342,9 +415,8 @@ export default function WorkoutRoute() {
                           />
                         </td>
 
-                        <td className="py-2 pr-2">
-                          <input
-                            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 outline-none focus:border-emerald-600"
+                        <td className="px-4 py-3">
+                          <HudInput
                             value={row.notes}
                             onChange={(e) => updateSet(ex.$id, idx, { notes: e.target.value })}
                             placeholder="optional"
@@ -356,14 +428,16 @@ export default function WorkoutRoute() {
                 </table>
 
                 {!setsByExercise[ex.$id]?.length ? (
-                  <p className="mt-3 text-sm text-zinc-400">No sets configured for this exercise.</p>
+                  <div className="px-4 py-4 text-sm text-zinc-400">
+                    No sets configured for this exercise.
+                  </div>
                 ) : null}
               </div>
-            </div>
+            </Panel>
           ))}
 
           {!exercises.length ? (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5 text-sm text-zinc-300">
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-5 text-sm text-zinc-300">
               No exercises found for this program day.
             </div>
           ) : null}
