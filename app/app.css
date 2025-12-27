@@ -1,15 +1,57 @@
 @import "tailwindcss";
 
+/* 👇 ADD THIS */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+  /* ✅ Pixel / arcade font */
+  --font-pixel: "Press Start 2P", ui-sans-serif, system-ui, sans-serif;
 }
 
 html,
 body {
-  @apply bg-white dark:bg-gray-950;
-
+  /* optional: you can even remove this if you want full manual control */
   @media (prefers-color-scheme: dark) {
     color-scheme: dark;
+  }
+}
+
+@layer base {
+  body {
+    /* match your app’s dark zinc look */
+    @apply bg-zinc-950 text-zinc-100 antialiased;
+  }
+}
+
+@layer utilities {
+  /* optional helpers */
+  .pixel {
+    font-family: var(--font-pixel);
+    letter-spacing: 0.06em;
+  }
+
+  /* subtle “broken mirror / glitch” vibe without needing inline styles */
+  .glitch {
+    position: relative;
+  }
+  .glitch::before,
+  .glitch::after {
+    content: attr(data-text);
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.25;
+  }
+  .glitch::before {
+    transform: translate(-1px, -1px);
+    filter: blur(0.3px);
+  }
+  .glitch::after {
+    transform: translate(1px, 1px);
+    filter: blur(0.6px);
+    opacity: 0.18;
   }
 }
