@@ -130,7 +130,6 @@ export default function ProfileRoute() {
           Query.limit(60),
         ]);
 
-        // Filter locally to “last 14 days” is MVP-safe (since we’re not guaranteed date fields)
         setWorkouts14((w.documents ?? []) as any);
 
         const n = await listNutritionLogs({
@@ -165,7 +164,6 @@ export default function ProfileRoute() {
     [workouts14],
   );
 
-  // Nutrition adherence / XP (same model as other tabs)
   const nutritionXP14 = useMemo(() => {
     if (!nutrition14?.length) return 0;
     let sum = 0;
@@ -197,19 +195,13 @@ export default function ProfileRoute() {
   const totalXP14 = useMemo(() => workoutXP14 + nutritionXP14, [workoutXP14, nutritionXP14]);
   const player = useMemo(() => levelFromXP(totalXP14), [totalXP14]);
 
-  /**
-   * Avatar Stats (MVP-derived):
-   * - Strength: workouts completed (until you tag strength vs cardio)
-   * - Stamina: placeholder (0 now) — add when you track cardio minutes
-   * - Health: nutrition XP normalized to 0–100
-   */
   const strength = useMemo(() => clamp(workoutCompleteCount * 10, 0, 100), [workoutCompleteCount]);
-  const stamina = useMemo(() => 0, []); // add later when you track cardio minutes
+  const stamina = useMemo(() => 0, []);
   const health = useMemo(() => clamp(Math.round(nutritionXP14 / 14), 0, 100), [nutritionXP14]);
 
   if (loading) {
     return (
-      <div className="mx-auto w-full max-w-3xl px-6 py-10">
+      <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
         <div className="text-sm text-zinc-300">Loading…</div>
       </div>
     );
@@ -217,7 +209,7 @@ export default function ProfileRoute() {
 
   if (error) {
     return (
-      <div className="mx-auto w-full max-w-3xl px-6 py-10">
+      <div className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
         <div className="rounded-xl border border-red-900/60 bg-red-950/30 p-4 text-sm text-red-200 shadow-[0_0_40px_rgba(16,185,129,0.08)]">
           {error}
         </div>
@@ -226,7 +218,7 @@ export default function ProfileRoute() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-6 py-10">
+    <main className="mx-auto w-full max-w-4xl px-4 py-6 pb-24 sm:px-6 sm:py-10">
       {/* CRT scanline + vignette overlay */}
       <div aria-hidden className="pointer-events-none fixed inset-0 z-0">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(16,185,129,0.10)_0%,rgba(0,0,0,0)_55%)]" />
@@ -235,26 +227,27 @@ export default function ProfileRoute() {
       </div>
 
       <div className="relative z-10">
-        <div className="flex items-center justify-between gap-3">
-          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-700/40 bg-emerald-950/30 px-4 py-2 text-xs tracking-[0.18em] text-emerald-200 shadow-[0_0_30px_rgba(16,185,129,0.12)]">
+        {/* Top row: pill + back (mobile friendly) */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-700/40 bg-emerald-950/30 px-4 py-2 text-xs tracking-[0.18em] text-emerald-200 shadow-[0_0_30px_rgba(16,185,129,0.12)]">
             <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.9)]" />
             PLAYER PROFILE // DAMAGE PLAN
           </div>
 
           <Link
             to="/today"
-            className="rounded-full border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-xs tracking-[0.18em] text-zinc-200 hover:bg-zinc-900/40"
+            className="inline-flex w-full items-center justify-center rounded-full border border-zinc-800 bg-zinc-950/40 px-4 py-2 text-xs tracking-[0.18em] text-zinc-200 hover:bg-zinc-900/40 sm:w-auto"
           >
             BACK
           </Link>
         </div>
 
-        <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-emerald-300 drop-shadow-[0_0_18px_rgba(16,185,129,0.25)]">
+        <h1 className="mt-5 text-3xl font-extrabold tracking-tight text-emerald-300 drop-shadow-[0_0_18px_rgba(16,185,129,0.25)] sm:mt-6 sm:text-4xl">
           PROFILE
         </h1>
         <p className="mt-2 text-sm text-zinc-300">Account + avatar stats console.</p>
 
-        <section className="mt-8 rounded-2xl border border-emerald-700/30 bg-zinc-950/40 p-6 shadow-[0_0_60px_rgba(16,185,129,0.12)]">
+        <section className="mt-6 rounded-2xl border border-emerald-700/30 bg-zinc-950/40 p-4 shadow-[0_0_60px_rgba(16,185,129,0.12)] sm:mt-8 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3">
             <div className="flex items-center gap-3">
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.9)]" />
@@ -265,9 +258,9 @@ export default function ProfileRoute() {
             </div>
           </div>
 
-          <div className="mt-6 grid grid-cols-1 gap-5">
+          <div className="mt-5 grid grid-cols-1 gap-4 sm:mt-6 sm:gap-5">
             {/* Identity */}
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/35 p-5">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/35 p-4 sm:p-5">
               <div className="text-xs tracking-[0.16em] text-zinc-400">SIGNED_IN_AS</div>
 
               <div className="mt-3 flex flex-col gap-1">
@@ -282,7 +275,7 @@ export default function ProfileRoute() {
             </div>
 
             {/* Player XP / Level */}
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/35 p-5">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/35 p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="text-xs tracking-[0.16em] text-zinc-400">PLAYER_STATS</div>
@@ -298,7 +291,9 @@ export default function ProfileRoute() {
               <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-950/55 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div className="text-xs tracking-[0.16em] text-zinc-400">XP (14D)</div>
-                  <div className="text-xs text-zinc-400">{player.into} / {player.next}</div>
+                  <div className="text-xs text-zinc-400">
+                    {player.into} / {player.next}
+                  </div>
                 </div>
                 <div className="mt-2 text-2xl font-extrabold text-zinc-100">{totalXP14}</div>
                 <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-zinc-900/70">
@@ -313,26 +308,14 @@ export default function ProfileRoute() {
               </div>
 
               <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <StatBar
-                  label="STRENGTH"
-                  value={strength}
-                  hint="MVP: based on completed workouts"
-                />
-                <StatBar
-                  label="STAMINA"
-                  value={stamina}
-                  hint="Add cardio minutes to unlock"
-                />
-                <StatBar
-                  label="HEALTH"
-                  value={health}
-                  hint="MVP: nutrition adherence"
-                />
+                <StatBar label="STRENGTH" value={strength} hint="MVP: based on completed workouts" />
+                <StatBar label="STAMINA" value={stamina} hint="Add cardio minutes to unlock" />
+                <StatBar label="HEALTH" value={health} hint="MVP: nutrition adherence" />
               </div>
             </div>
 
             {/* Progress Photos (placeholder) */}
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/35 p-5">
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/35 p-4 sm:p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-xs tracking-[0.16em] text-zinc-400">PROGRESS_PHOTOS</div>
@@ -356,8 +339,8 @@ export default function ProfileRoute() {
               </div>
             </div>
 
-            {/* Preferences (kept) */}
-            <div className="rounded-xl border border-zinc-800 bg-zinc-950/35 p-5">
+            {/* Preferences */}
+            <div className="rounded-xl border border-zinc-800 bg-zinc-950/35 p-4 sm:p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-xs tracking-[0.16em] text-zinc-400">PREFERENCES</div>
