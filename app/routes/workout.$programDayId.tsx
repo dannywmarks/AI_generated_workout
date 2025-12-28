@@ -1,5 +1,5 @@
 // app/routes/workout.$programDayId.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Query } from "appwrite";
 import { databases } from "~/lib/appwrite.client";
@@ -125,6 +125,53 @@ function clamp01(n: number) {
   return n;
 }
 
+function formatMMSS(totalSec: number) {
+  const s = Math.max(0, Math.floor(totalSec));
+  const mm = String(Math.floor(s / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return `${mm}:${ss}`;
+}
+
+/**
+ * Rest presets (seconds) based on your scheme.
+ * We infer a category from reps + a couple name heuristics.
+ */
+type RestPreset = { seconds: number; label: string };
+
+function restPresetForExercise(ex: ProgramExercise): RestPreset {
+  const name = (ex.name || "").toLowerCase();
+  const repMax = Number(ex.repMax || 0);
+
+  const looksLikeCarry = /farmer|carry|suitcase|yoke/.test(name);
+  const looksLikeCore = /ab|wheel|pallof|plank|dead bug|hollow/.test(name);
+
+  // Carries: 90–150 sec
+  if (looksLikeCarry) return { seconds: 120, label: "CARRY (90–150s)" };
+
+  // Core / carries: 60–120 sec
+  if (looksLikeCore) return { seconds: 90, label: "CORE (60–120s)" };
+
+  // Main compound strength (4–6 reps): 3–5 minutes
+  if (repMax > 0 && repMax <= 6) return { seconds: 240, label: "STRENGTH (3–5m)" };
+
+  // Compound hypertrophy (6–12 reps): 2–3 minutes
+  if (repMax > 0 && repMax <= 12) return { seconds: 150, label: "HYPERTROPHY (2–3m)" };
+
+  // Accessories / isolations (10–20 reps): 60–90 seconds
+  return { seconds: 75, label: "ACCESSORY (60–90s)" };
+}
+
+type RestTimerState = {
+  running: boolean;
+  startedAtMs: number | null;
+  durationSec: number;
+  exerciseId: string | null;
+  exerciseName: string | null;
+  setNumber: number | null; // 1-based
+  presetLabel: string | null;
+  auto: boolean; // whether last start was auto-triggered
+};
+
 function ProgressBar(props: { value: number; label?: string }) {
   const pct = Math.round(clamp01(props.value) * 100);
   return (
@@ -245,6 +292,104 @@ export default function WorkoutRoute() {
   const [setsByExercise, setSetsByExercise] = useState<Record<string, SetState[]>>(
     {},
   );
+
+  // ===== Rest Timer =====
+  const [restTimer, setRestTimer] = useState<RestTimerState>({
+    running: false,
+    startedAtMs: null,
+    durationSec: 0,
+    exerciseId: null,
+    exerciseName: null,
+    setNumber: null,
+    presetLabel: null,
+    auto: false,
+  });
+  const [restNowMs, setRestNowMs] = useState<number>(() => Date.now());
+  const lastAutoStartRef = useRef<string | null>(null); // prevents re-trigger loops
+
+  useEffect(() => {
+    if (!restTimer.running) return;
+    const t = window.setInterval(() => setRestNowMs(Date.now()), 250);
+    return () => window.clearInterval(t);
+  }, [restTimer.running]);
+
+  const restElapsedSec = useMemo(() => {
+    if (!restTimer.running || !restTimer.startedAtMs) return 0;
+    return Math.max(0, Math.floor((restNowMs - restTimer.startedAtMs) / 1000));
+  }, [restNowMs, restTimer.running, restTimer.startedAtMs]);
+
+  const restRemainingSec = useMemo(() => {
+    if (!restTimer.running) return 0;
+    const dur = Number(restTimer.durationSec || 0);
+    return Math.max(0, dur - restElapsedSec);
+  }, [restTimer.running, restTimer.durationSec, restElapsedSec]);
+
+  const restProgress = useMemo(() => {
+    const dur = Number(restTimer.durationSec || 0);
+    if (!restTimer.running || dur <= 0) return 0;
+    return clamp01(restElapsedSec / dur);
+  }, [restTimer.running, restTimer.durationSec, restElapsedSec]);
+
+  useEffect(() => {
+    // auto-stop when reaches 0
+    if (!restTimer.running) return;
+    if (restTimer.durationSec > 0 && restRemainingSec <= 0) {
+      setRestTimer((prev) => ({ ...prev, running: false }));
+    }
+  }, [restRemainingSec, restTimer.running, restTimer.durationSec]);
+
+  function startRestTimer(opts: {
+    ex: ProgramExercise;
+    setNumber: number;
+    seconds?: number;
+    label?: string;
+    auto?: boolean;
+  }) {
+    const preset = restPresetForExercise(opts.ex);
+
+    // IMPORTANT: avoid mixing ?? and || without parentheses.
+    // We'll do it in two steps for TS happiness.
+    const givenSeconds = opts.seconds ?? null;
+    const dur = givenSeconds != null ? givenSeconds : preset.seconds;
+
+    const givenLabel = opts.label ?? null;
+    const lbl = givenLabel != null ? givenLabel : preset.label;
+
+    const key = `${opts.ex.$id}:${opts.setNumber}:${dur}:${lbl}:${opts.auto ? "A" : "M"}`;
+    lastAutoStartRef.current = key;
+
+    setRestNowMs(Date.now());
+    setRestTimer({
+      running: true,
+      startedAtMs: Date.now(),
+      durationSec: dur,
+      exerciseId: opts.ex.$id,
+      exerciseName: opts.ex.name,
+      setNumber: opts.setNumber,
+      presetLabel: lbl,
+      auto: Boolean(opts.auto),
+    });
+  }
+
+  function stopRestTimer() {
+    setRestTimer((prev) => ({ ...prev, running: false }));
+  }
+
+  function adjustRestTimer(deltaSec: number) {
+    setRestTimer((prev) => {
+      const cur = Number(prev.durationSec || 0);
+      const next = Math.max(10, cur + deltaSec);
+      return { ...prev, durationSec: next };
+    });
+  }
+
+  function restartRestTimer() {
+    setRestTimer((prev) => {
+      if (!prev.exerciseId || !prev.setNumber) return prev;
+      return { ...prev, running: true, startedAtMs: Date.now() };
+    });
+    setRestNowMs(Date.now());
+  }
 
   // validation snapshot (for UI)
   const validationByExercise = useMemo(() => {
@@ -372,8 +517,35 @@ export default function WorkoutRoute() {
   function updateSet(exId: string, idx: number, patch: Partial<SetState>) {
     setSetsByExercise((prev) => {
       const arr = prev[exId] ? [...prev[exId]] : [];
-      const row = arr[idx] ?? { reps: "", weight: "", rir: "", notes: "" };
-      arr[idx] = { ...row, ...patch };
+      const prevRow = arr[idx] ?? { reps: "", weight: "", rir: "", notes: "" };
+      const nextRow = { ...prevRow, ...patch };
+
+      arr[idx] = nextRow;
+
+      // Auto-start rest timer when a set transitions to completed
+      // (compare validation before vs after)
+      const before = validateSet(prevRow);
+      const after = validateSet(nextRow);
+
+      if (!before.completed && after.completed) {
+        const ex = exercises.find((e) => e.$id === exId);
+        if (ex) {
+          const preset = restPresetForExercise(ex);
+          const key = `${exId}:${idx + 1}:${preset.seconds}:${preset.label}:A`;
+
+          // prevent repeated starts if React replays state updates
+          if (lastAutoStartRef.current !== key) {
+            startRestTimer({
+              ex,
+              setNumber: idx + 1,
+              seconds: preset.seconds,
+              label: preset.label,
+              auto: true,
+            });
+          }
+        }
+      }
+
       return { ...prev, [exId]: arr };
     });
   }
@@ -509,7 +681,7 @@ export default function WorkoutRoute() {
         }}
       />
 
-      <div className="relative mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-10">
+      <div className="relative mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-10 pb-36">
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <Pill>WORKOUT_CONSOLE // DAMAGE PLAN</Pill>
           <Link
@@ -537,6 +709,10 @@ export default function WorkoutRoute() {
                 {totalCompletedSets}/{totalPlannedSets}
               </span>
               {REQUIRE_RIR ? " • RIR required" : " • RIR optional"}
+              {" • "}
+              <span className="text-emerald-200/90">
+                auto-rest starts when a set completes
+              </span>
             </div>
           </div>
         </div>
@@ -601,16 +777,25 @@ export default function WorkoutRoute() {
         <div className="mt-6 space-y-4">
           {exercises.map((ex) => {
             const prog = exerciseProgress(ex.$id, ex.sets);
+            const preset = restPresetForExercise(ex);
+
             return (
               <Panel
                 key={ex.$id}
                 title={ex.name}
                 right={
-                  <div className="w-full sm:w-[240px]">
+                  <div className="w-full sm:w-[260px]">
                     <ProgressBar value={prog.pct} label="EXERCISE" />
                     <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-zinc-500">
                       {prog.completed}/{prog.planned} complete
                       {prog.partial ? ` • ${prog.partial} partial` : ""}
+                    </div>
+                    <div className="mt-2 text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+                      REST DEFAULT:{" "}
+                      <span className="text-emerald-200/90">
+                        {preset.label} ({Math.round(preset.seconds / 60)}m{" "}
+                        {preset.seconds % 60}s)
+                      </span>
                     </div>
                   </div>
                 }
@@ -622,7 +807,7 @@ export default function WorkoutRoute() {
                 </div>
 
                 <div className="overflow-x-auto rounded-xl border border-zinc-800/70 bg-zinc-950/30">
-                  <table className="w-full min-w-[720px] text-left text-sm">
+                  <table className="w-full min-w-[820px] text-left text-sm">
                     <thead className="bg-zinc-950/40 text-[11px] uppercase tracking-[0.22em] text-zinc-400">
                       <tr>
                         <th className="px-4 py-3">Set</th>
@@ -630,6 +815,7 @@ export default function WorkoutRoute() {
                         <th className="px-4 py-3">Reps</th>
                         <th className="px-4 py-3">RIR</th>
                         <th className="px-4 py-3">Notes</th>
+                        <th className="px-4 py-3">Rest</th>
                       </tr>
                     </thead>
                     <tbody className="text-zinc-200">
@@ -646,11 +832,14 @@ export default function WorkoutRoute() {
                             ? "border-red-900/50"
                             : "border-zinc-800/70";
 
+                        const isCurrentTimer =
+                          restTimer.exerciseId === ex.$id &&
+                          restTimer.setNumber === idx + 1 &&
+                          (restTimer.running || restRemainingSec === 0);
+
                         return (
                           <tr key={idx} className={`border-t ${rowTone}`}>
-                            <td className="px-4 py-3 text-zinc-300">
-                              {idx + 1}
-                            </td>
+                            <td className="px-4 py-3 text-zinc-300">{idx + 1}</td>
 
                             <td className="px-4 py-3">
                               <div className="space-y-1">
@@ -663,9 +852,7 @@ export default function WorkoutRoute() {
                                   ].join(" ")}
                                   value={row.weight}
                                   onChange={(e) =>
-                                    updateSet(ex.$id, idx, {
-                                      weight: e.target.value,
-                                    })
+                                    updateSet(ex.$id, idx, { weight: e.target.value })
                                   }
                                   inputMode="decimal"
                                   placeholder="lbs"
@@ -689,9 +876,7 @@ export default function WorkoutRoute() {
                                   ].join(" ")}
                                   value={row.reps}
                                   onChange={(e) =>
-                                    updateSet(ex.$id, idx, {
-                                      reps: e.target.value,
-                                    })
+                                    updateSet(ex.$id, idx, { reps: e.target.value })
                                   }
                                   inputMode="numeric"
                                   placeholder="reps"
@@ -715,9 +900,7 @@ export default function WorkoutRoute() {
                                   ].join(" ")}
                                   value={row.rir}
                                   onChange={(e) =>
-                                    updateSet(ex.$id, idx, {
-                                      rir: e.target.value,
-                                    })
+                                    updateSet(ex.$id, idx, { rir: e.target.value })
                                   }
                                   inputMode="numeric"
                                   placeholder="RIR"
@@ -734,24 +917,47 @@ export default function WorkoutRoute() {
                               <HudInput
                                 value={row.notes}
                                 onChange={(e) =>
-                                  updateSet(ex.$id, idx, {
-                                    notes: e.target.value,
-                                  })
+                                  updateSet(ex.$id, idx, { notes: e.target.value })
                                 }
                                 placeholder="optional"
                               />
 
                               <div className="mt-2 text-xs text-zinc-500">
                                 {v.completed ? (
-                                  <span className="text-emerald-200/90">
-                                    ✓ complete
-                                  </span>
+                                  <span className="text-emerald-200/90">✓ complete</span>
                                 ) : v.partial ? (
                                   <span className="text-red-200">incomplete</span>
                                 ) : (
                                   <span>empty</span>
                                 )}
                               </div>
+                            </td>
+
+                            <td className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  startRestTimer({
+                                    ex,
+                                    setNumber: idx + 1,
+                                    seconds: preset.seconds,
+                                    label: preset.label,
+                                    auto: false,
+                                  })
+                                }
+                                className={[
+                                  "inline-flex items-center justify-center rounded-xl border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em]",
+                                  isCurrentTimer
+                                    ? "border-emerald-700/60 bg-emerald-950/35 text-emerald-200"
+                                    : "border-zinc-800 bg-zinc-950/40 text-zinc-200 hover:bg-zinc-900/40",
+                                ].join(" ")}
+                              >
+                                {isCurrentTimer
+                                  ? restTimer.running
+                                    ? `RESTING ${formatMMSS(restRemainingSec)}`
+                                    : "REST DONE"
+                                  : "START REST"}
+                              </button>
                             </td>
                           </tr>
                         );
@@ -774,6 +980,96 @@ export default function WorkoutRoute() {
               No exercises found for this program day.
             </div>
           ) : null}
+        </div>
+      </div>
+
+      {/* ===== Sticky Rest HUD ===== */}
+      <div className="fixed bottom-0 left-0 right-0 z-50">
+        <div className="mx-auto max-w-4xl px-4 pb-4 sm:px-6">
+          <div className="rounded-2xl border border-emerald-900/40 bg-zinc-950/80 backdrop-blur shadow-[0_0_0_1px_rgba(16,185,129,0.10),0_18px_60px_rgba(0,0,0,0.55)]">
+            <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-400">
+                  REST TIMER
+                </div>
+                <div className="mt-1 truncate text-sm font-semibold text-zinc-100">
+                  {restTimer.exerciseName
+                    ? `${restTimer.exerciseName} • Set ${restTimer.setNumber ?? "—"}`
+                    : "No active rest"}
+                </div>
+                <div className="mt-1 text-xs text-zinc-400">
+                  {restTimer.presetLabel ? (
+                    <span>
+                      Preset:{" "}
+                      <span className="text-emerald-200/90">
+                        {restTimer.presetLabel}
+                      </span>
+                      {restTimer.auto ? " • auto" : " • manual"}
+                    </span>
+                  ) : (
+                    <span>Complete a set to auto-start rest.</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="w-full sm:w-[320px]">
+                <div className="flex items-end justify-between gap-3">
+                  <div className="text-2xl font-extrabold tracking-tight text-emerald-200">
+                    {restTimer.running
+                      ? formatMMSS(restRemainingSec)
+                      : restTimer.startedAtMs
+                        ? "00:00"
+                        : "--:--"}
+                  </div>
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-500">
+                    {restTimer.durationSec ? `of ${formatMMSS(restTimer.durationSec)}` : ""}
+                  </div>
+                </div>
+                <div className="mt-2">
+                  <ProgressBar value={restProgress} label="REST" />
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <button
+                    type="button"
+                    onClick={() => adjustRestTimer(+30)}
+                    className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-200 hover:bg-zinc-900/40"
+                    disabled={!restTimer.startedAtMs}
+                  >
+                    +30s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => adjustRestTimer(-30)}
+                    className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-200 hover:bg-zinc-900/40"
+                    disabled={!restTimer.startedAtMs}
+                  >
+                    -30s
+                  </button>
+                  <button
+                    type="button"
+                    onClick={stopRestTimer}
+                    className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-200 hover:bg-zinc-900/40"
+                    disabled={!restTimer.running}
+                  >
+                    Stop
+                  </button>
+                  <button
+                    type="button"
+                    onClick={restartRestTimer}
+                    className="rounded-xl border border-emerald-900/50 bg-emerald-950/30 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200 hover:bg-emerald-950/45 disabled:opacity-60"
+                    disabled={!restTimer.exerciseId || !restTimer.setNumber}
+                  >
+                    Restart
+                  </button>
+                </div>
+
+                <div className="mt-2 text-[11px] uppercase tracking-[0.22em] text-zinc-500">
+                  Tip: if reps would drop badly, add 30–60s.
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </main>
