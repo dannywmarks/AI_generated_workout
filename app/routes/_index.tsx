@@ -7,7 +7,7 @@ export default function IndexRoute() {
       {/* Ambient glow */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -top-48 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-emerald-500/10 blur-3xl" />
-        <div className="absolute -bottom-48 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-emerald-400/10 blur-3xl" />
+        <div className="absolute -bottom-48 left-1/2 h-80 w-80 -translate-x-1/2 rounded-full bg-emerald-400/10 blur-3xl" />
       </div>
 
       {/* Subtle grid */}
@@ -52,7 +52,7 @@ export default function IndexRoute() {
               <img
                 src="/damage_plan.png"
                 alt="Damage Plan"
-                className="w-[840px] max-w-[98vw] select-none [image-rendering:pixelated]"
+                className="w-[540px] max-w-[98vw] select-none [image-rendering:pixelated]"
                 draggable={false}
               />
             </div>

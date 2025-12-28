@@ -4,8 +4,6 @@ import { Link, useLocation } from "react-router";
 import { AppNav } from "~/components/AppNav";
 import { User, LogOut } from "lucide-react";
 
-// ✅ put DP_Logo.PNG somewhere your bundler can import (recommended):
-// app/assets/DP_Logo.PNG  (or /public/DP_Logo.PNG and use src="/DP_Logo.PNG")
 import dpLogo from "../../public/DP_Logo.png";
 
 export function AppShell(props: { rightSlot?: ReactNode; children: ReactNode }) {
@@ -39,35 +37,25 @@ export function AppShell(props: { rightSlot?: ReactNode; children: ReactNode }) 
 
       {/* Top App Bar (GLOBAL) */}
       <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-6 py-4">
+        <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-3 sm:gap-4 sm:px-6 sm:py-4">
           {/* Brand */}
           <div className="min-w-0">
-            <div className="relative select-none">
-              {/* glow plate */}
-              <div
-                aria-hidden="true"
-                className=""
+            <div className="flex min-w-0 items-center gap-3">
+              <img
+                src={dpLogo}
+                alt="Damage Plan"
+                draggable={false}
+                className={[
+                  "block select-none object-contain",
+                  "h-10 sm:h-12",
+                  "max-w-[170px] sm:max-w-[220px]",
+                ].join(" ")}
               />
-
-              {/* ✅ Logo replaces DAMAGE PLAN text */}
-              <div className="flex items-center gap-3">
-            
-               
-                  <img
-                    src={dpLogo}
-                    alt="Damage Plan"
-                    className="h-22 w-auto select-none "
-                    draggable={false}
-                  />
-             
-
-            
-              </div>
             </div>
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             {props.rightSlot ? (
               props.rightSlot
             ) : (
@@ -96,7 +84,7 @@ export function AppShell(props: { rightSlot?: ReactNode; children: ReactNode }) 
       </header>
 
       {/* Page content */}
-      <main className="relative z-10 mx-auto max-w-4xl px-6 py-6 pb-24">
+      <main className="relative z-10 mx-auto max-w-4xl px-4 py-6 pb-24 sm:px-6">
         {props.children}
       </main>
 
