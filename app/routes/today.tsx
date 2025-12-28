@@ -36,11 +36,15 @@ function diffWeeksSafe(startIso: string) {
 type ProgramDay = any;
 type ProgramExercise = any;
 
-// This feeds __app.tsx -> AppShell (prevents double headers)
 export const handle = {
   title: "Today",
   subtitle: "Damage Plan",
 };
+
+function clampInt(n: any, fallback: number) {
+  const x = Number(n);
+  return Number.isFinite(x) ? Math.floor(x) : fallback;
+}
 
 export default function TodayRoute() {
   const navigate = useNavigate();
@@ -51,6 +55,11 @@ export default function TodayRoute() {
   const [programDay, setProgramDay] = useState<ProgramDay | null>(null);
   const [exercises, setExercises] = useState<ProgramExercise[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // Derived display helpers
+  const cycleLen = clampInt(program?.daysPerWeek, 4) === 3 ? 3 : 4;
+  const currentIdx = clampInt(program?.currentDayIndex, 0) % cycleLen; // 0..(cycleLen-1)
+  const targetOrder = currentIdx + 1; // 1..cycleLen
 
   useEffect(() => {
     assertEnv();
@@ -77,19 +86,21 @@ export default function TodayRoute() {
         const wk = active?.startDate ? diffWeeksSafe(active.startDate) : 1;
         setWeekNumber(wk);
 
-        // pick today's program day:
-        const isThreeDay = Number(active.daysPerWeek) === 3;
-        const currentIdx = Number(active.currentDayIndex ?? 0);
-        const targetOrder = isThreeDay ? currentIdx + 1 : 1;
+        const daysPerWeek = clampInt(active.daysPerWeek, 4);
+        const cycle = daysPerWeek === 3 ? 3 : 4;
 
-        if (!Number.isInteger(targetOrder) || targetOrder < 1 || targetOrder > 4) {
-          throw new Error(`[today] Invalid targetOrder computed: ${targetOrder}`);
+        const idx = clampInt(active.currentDayIndex, 0) % cycle;
+        const order = idx + 1;
+
+        if (!Number.isInteger(order) || order < 1 || order > 4) {
+          throw new Error(`[today] Invalid targetOrder computed: ${order}`);
         }
 
+        // ✅ IMPORTANT: weekNumber must be a number (integer attribute in Appwrite)
         const daysRes = await databases.listDocuments(DB_ID, COL_PROGRAM_DAYS, [
           Query.equal("programId", active.$id),
           Query.equal("weekNumber", wk),
-          Query.equal("orderIndex", targetOrder),
+          Query.equal("orderIndex", order),
           Query.limit(1),
         ]);
 
@@ -153,7 +164,6 @@ export default function TodayRoute() {
     <div className="relative">
       <ArcadeBackdrop />
 
-      {/* HUD / Console strip */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex items-center gap-2 rounded-full border border-emerald-900/60 bg-emerald-950/30 px-3 py-1 text-[11px] tracking-widest text-emerald-200/90 shadow-[0_0_40px_rgba(16,185,129,0.08)]">
           <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(16,185,129,0.8)]" />
@@ -170,11 +180,16 @@ export default function TodayRoute() {
               {status}
             </span>
           </span>
+
+          {/* ✅ Debug: confirm rotation is advancing */}
+          <span className="hidden sm:inline rounded-full border border-zinc-800 bg-zinc-950/40 px-3 py-1">
+            NEXT: <span className="text-zinc-100">#{targetOrder}</span>{" "}
+            <span className="text-zinc-500">(idx {currentIdx})</span>
+          </span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4">
-        {/* WORKOUT PANEL */}
         <section className="relative overflow-hidden rounded-2xl border border-emerald-900/50 bg-zinc-900/35 p-5 shadow-[0_0_80px_rgba(16,185,129,0.08)]">
           <PanelGlow />
 
@@ -196,9 +211,7 @@ export default function TodayRoute() {
               </div>
 
               <div className="text-sm tracking-widest text-zinc-400">TODAY_LOADOUT</div>
-              <div className="mt-2 text-xl font-semibold text-emerald-200">
-                {dayLabel}
-              </div>
+              <div className="mt-2 text-xl font-semibold text-emerald-200">{dayLabel}</div>
 
               {programDay?.isDeload ? (
                 <p className="mt-3 text-xs text-amber-300">
@@ -218,7 +231,6 @@ export default function TodayRoute() {
             ) : null}
           </div>
 
-          {/* exercise list */}
           <div className="mt-5">
             {exercises.length ? (
               <div className="space-y-2">
@@ -263,13 +275,10 @@ export default function TodayRoute() {
         {/* NUTRITION PANEL */}
         <section className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/35 p-5">
           <PanelGlow subtle />
-
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/35 px-4 py-3">
             <div className="flex items-center gap-3">
               <span className="h-2 w-2 rounded-full bg-emerald-400/90 shadow-[0_0_18px_rgba(16,185,129,0.6)]" />
-              <div className="text-xs tracking-widest text-zinc-200/90">
-                NUTRITION_CONSOLE
-              </div>
+              <div className="text-xs tracking-widest text-zinc-200/90">NUTRITION_CONSOLE</div>
             </div>
             <div className="text-xs tracking-widest text-zinc-400">STATUS: READY</div>
           </div>
@@ -280,21 +289,16 @@ export default function TodayRoute() {
             <Stat label="PROTEIN_G" value={String(program?.proteinTarget ?? 0)} />
           </div>
 
-          <p className="mt-4 text-xs text-zinc-400">
-            Next: add “log macros” + adherence score.
-          </p>
+          <p className="mt-4 text-xs text-zinc-400">Next: add “log macros” + adherence score.</p>
         </section>
 
         {/* ACTIVITY PANEL */}
         <section className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/35 p-5">
           <PanelGlow subtle />
-
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/35 px-4 py-3">
             <div className="flex items-center gap-3">
               <span className="h-2 w-2 rounded-full bg-emerald-400/90 shadow-[0_0_18px_rgba(16,185,129,0.6)]" />
-              <div className="text-xs tracking-widest text-zinc-200/90">
-                ACTIVITY_CONSOLE
-              </div>
+              <div className="text-xs tracking-widest text-zinc-200/90">ACTIVITY_CONSOLE</div>
             </div>
             <div className="text-xs tracking-widest text-zinc-400">STATUS: READY</div>
           </div>
@@ -305,9 +309,7 @@ export default function TodayRoute() {
             <Stat label="Z2_MIN" value={String(program?.rowMinutes ?? 0)} />
           </div>
 
-          <p className="mt-4 text-xs text-zinc-400">
-            Next: add “log steps” + “log row session” actions.
-          </p>
+          <p className="mt-4 text-xs text-zinc-400">Next: add “log steps” + “log row session” actions.</p>
         </section>
       </div>
     </div>
@@ -329,9 +331,7 @@ function PanelGlow(props: { subtle?: boolean }) {
       aria-hidden="true"
       className={[
         "pointer-events-none absolute inset-0",
-        props.subtle
-          ? "opacity-40"
-          : "opacity-70",
+        props.subtle ? "opacity-40" : "opacity-70",
       ].join(" ")}
     >
       <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full bg-emerald-500/10 blur-3xl" />
@@ -344,11 +344,8 @@ function PanelGlow(props: { subtle?: boolean }) {
 function ArcadeBackdrop() {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10">
-      {/* vignette */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(16,185,129,0.10),transparent_55%)]" />
-      {/* scanlines */}
       <div className="absolute inset-0 opacity-[0.10] [background:repeating-linear-gradient(to_bottom,rgba(255,255,255,0.06)_0px,rgba(255,255,255,0.06)_1px,transparent_2px,transparent_6px)]" />
-      {/* subtle noise-ish grid */}
       <div className="absolute inset-0 opacity-[0.06] [background:linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:32px_32px]" />
     </div>
   );

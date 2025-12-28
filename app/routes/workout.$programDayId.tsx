@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { Query } from "appwrite";
 import { databases } from "~/lib/appwrite.client";
 import { getCurrentUser } from "~/services/auth.client";
-import { getActiveProgram } from "~/services/programs.client";
+import { getActiveProgram, updateProgram } from "~/services/programs.client";
 import {
   getOrCreateWorkoutLog,
   listSetLogs,
@@ -17,7 +17,9 @@ const COL_PROGRAM_EXERCISES = import.meta.env.VITE_COL_PROGRAM_EXERCISES as stri
 
 function assertEnv() {
   if (!DB_ID || !COL_PROGRAM_EXERCISES) {
-    throw new Error("[ENV] Missing VITE_APPWRITE_DATABASE_ID or VITE_COL_PROGRAM_EXERCISES");
+    throw new Error(
+      "[ENV] Missing VITE_APPWRITE_DATABASE_ID or VITE_COL_PROGRAM_EXERCISES",
+    );
   }
 }
 
@@ -47,7 +49,7 @@ type SetErrors = {
 
 type SetProgress = {
   completed: boolean;
-  partial: boolean; // must be boolean (your TS error)
+  partial: boolean;
   errors: SetErrors;
 };
 
@@ -64,7 +66,7 @@ function isInt(n: number) {
  * Strict logging rules:
  * - Weight must be a positive number
  * - Reps must be a positive integer
- * - RIR must be an integer between 0 and 6 (adjust as you like)
+ * - RIR must be an integer between 0 and 6
  *
  * If you want RIR optional, set REQUIRE_RIR = false.
  */
@@ -104,7 +106,6 @@ function validateSet(row: SetState): SetProgress {
     else if (!isInt(rir)) errors.rir = "Whole number";
     else if (rir < 0 || rir > 6) errors.rir = "0–6";
   } else {
-    // optional RIR: validate only if provided
     if (row.rir.trim()) {
       if (rir == null) errors.rir = "Enter a number";
       else if (!isInt(rir)) errors.rir = "Whole number";
@@ -113,7 +114,7 @@ function validateSet(row: SetState): SetProgress {
   }
 
   const completed = Object.keys(errors).length === 0;
-  const partial = !!hasAny && !completed; // ✅ boolean only (fixes your TS error)
+  const partial = !!hasAny && !completed;
 
   return { completed, partial, errors };
 }
@@ -151,7 +152,11 @@ function Pill(props: { children: React.ReactNode }) {
   );
 }
 
-function Panel(props: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+function Panel(props: {
+  title: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section className="relative overflow-hidden rounded-2xl border border-emerald-900/40 bg-zinc-950/40 shadow-[0_0_0_1px_rgba(16,185,129,0.12),0_18px_60px_rgba(0,0,0,0.55)]">
       <div className="pointer-events-none absolute inset-0 opacity-70">
@@ -216,6 +221,12 @@ function HudTextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   );
 }
 
+// This feeds __app.tsx -> AppShell (prevents double headers)
+export const handle = {
+  title: "Workout",
+  subtitle: "Damage Plan",
+};
+
 export default function WorkoutRoute() {
   const navigate = useNavigate();
   const params = useParams();
@@ -231,7 +242,9 @@ export default function WorkoutRoute() {
   const [workoutNotes, setWorkoutNotes] = useState("");
 
   const [exercises, setExercises] = useState<ProgramExercise[]>([]);
-  const [setsByExercise, setSetsByExercise] = useState<Record<string, SetState[]>>({});
+  const [setsByExercise, setSetsByExercise] = useState<Record<string, SetState[]>>(
+    {},
+  );
 
   // validation snapshot (for UI)
   const validationByExercise = useMemo(() => {
@@ -306,6 +319,7 @@ export default function WorkoutRoute() {
         }
         setProgram(active);
 
+        // 1) Load exercises for this program day
         const exRes = await databases.listDocuments(DB_ID, COL_PROGRAM_EXERCISES, [
           Query.equal("programDayId", programDayId),
           Query.orderAsc("orderIndex"),
@@ -315,6 +329,7 @@ export default function WorkoutRoute() {
         const exs = exRes.documents as any as ProgramExercise[];
         setExercises(exs);
 
+        // 2) Create-or-load workout log (one per day/date)
         const log = await getOrCreateWorkoutLog({
           programId: active.$id,
           programDayId,
@@ -323,6 +338,7 @@ export default function WorkoutRoute() {
         setWorkoutLogId(log.$id);
         setWorkoutNotes((log as any)?.notes ?? "");
 
+        // 3) Prefill set state from existing set logs (if user revisits)
         const existingSets = await listSetLogs(log.$id);
 
         const next: Record<string, SetState[]> = {};
@@ -330,7 +346,8 @@ export default function WorkoutRoute() {
           const rows: SetState[] = [];
           for (let i = 1; i <= Number(ex.sets || 0); i++) {
             const match = existingSets.find(
-              (s) => s.programExerciseId === ex.$id && Number(s.setNumber) === i,
+              (s: any) =>
+                s.programExerciseId === ex.$id && Number(s.setNumber) === i,
             );
             rows.push({
               reps: match?.reps != null ? String(match.reps) : "",
@@ -401,14 +418,17 @@ export default function WorkoutRoute() {
       for (const ex of exercises) {
         const rows = setsByExercise[ex.$id] ?? [];
         rows.forEach((r, i) => {
-          // Only store numbers if valid; otherwise store nulls (keeps DB clean)
           const v = validateSet(r);
           payload.push({
             programExerciseId: ex.$id,
             setNumber: i + 1,
             reps: v.completed ? safeNum(r.reps) : null,
             weight: v.completed ? safeNum(r.weight) : null,
-            rir: v.completed ? safeNum(r.rir) : (REQUIRE_RIR ? null : safeNum(r.rir)),
+            rir: v.completed
+              ? safeNum(r.rir)
+              : REQUIRE_RIR
+                ? null
+                : safeNum(r.rir),
             notes: r.notes?.trim() ? r.notes.trim() : null,
           });
         });
@@ -448,6 +468,17 @@ export default function WorkoutRoute() {
     try {
       await onSave();
       await updateWorkoutLog(workoutLogId, { status: "complete" });
+
+      // ✅ Advance to next workout (cycle orderIndex = currentDayIndex+1)
+      // Your generated plan is 4 days/week, so cycle length is 4.
+      const cycleLen = 4;
+      const prevIdx = Number(program?.currentDayIndex ?? 0);
+      const nextIdx = (prevIdx + 1) % cycleLen;
+
+      if (program?.$id) {
+        await updateProgram(program.$id, { currentDayIndex: nextIdx });
+      }
+
       navigate("/today", { replace: true });
     } catch (e: any) {
       console.error("[workout finish] error:", e);
@@ -460,7 +491,9 @@ export default function WorkoutRoute() {
   if (loading) {
     return (
       <main className="min-h-screen bg-zinc-950 text-zinc-100">
-        <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">Loading workout…</div>
+        <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
+          Loading workout…
+        </div>
       </main>
     );
   }
@@ -547,7 +580,9 @@ export default function WorkoutRoute() {
           }
         >
           <label className="block">
-            <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-400">NOTES</div>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-zinc-400">
+              NOTES
+            </div>
             <HudTextArea
               rows={3}
               value={workoutNotes}
@@ -581,7 +616,8 @@ export default function WorkoutRoute() {
                 }
               >
                 <div className="mb-4 text-xs text-zinc-400">
-                  {ex.sets} sets • {ex.repMin}–{ex.repMax} reps • target RIR {ex.rirTarget}
+                  {ex.sets} sets • {ex.repMin}–{ex.repMax} reps • target RIR{" "}
+                  {ex.rirTarget}
                   {ex.notes ? ` • ${ex.notes}` : ""}
                 </div>
 
@@ -612,22 +648,32 @@ export default function WorkoutRoute() {
 
                         return (
                           <tr key={idx} className={`border-t ${rowTone}`}>
-                            <td className="px-4 py-3 text-zinc-300">{idx + 1}</td>
+                            <td className="px-4 py-3 text-zinc-300">
+                              {idx + 1}
+                            </td>
 
                             <td className="px-4 py-3">
                               <div className="space-y-1">
                                 <HudInput
                                   className={[
                                     "w-28",
-                                    v.errors.weight ? "border-red-900/60 focus:border-red-700/60 focus:ring-red-600/20" : "",
+                                    v.errors.weight
+                                      ? "border-red-900/60 focus:border-red-700/60 focus:ring-red-600/20"
+                                      : "",
                                   ].join(" ")}
                                   value={row.weight}
-                                  onChange={(e) => updateSet(ex.$id, idx, { weight: e.target.value })}
+                                  onChange={(e) =>
+                                    updateSet(ex.$id, idx, {
+                                      weight: e.target.value,
+                                    })
+                                  }
                                   inputMode="decimal"
                                   placeholder="lbs"
                                 />
                                 {v.errors.weight ? (
-                                  <div className="text-xs text-red-200">{v.errors.weight}</div>
+                                  <div className="text-xs text-red-200">
+                                    {v.errors.weight}
+                                  </div>
                                 ) : null}
                               </div>
                             </td>
@@ -637,15 +683,23 @@ export default function WorkoutRoute() {
                                 <HudInput
                                   className={[
                                     "w-24",
-                                    v.errors.reps ? "border-red-900/60 focus:border-red-700/60 focus:ring-red-600/20" : "",
+                                    v.errors.reps
+                                      ? "border-red-900/60 focus:border-red-700/60 focus:ring-red-600/20"
+                                      : "",
                                   ].join(" ")}
                                   value={row.reps}
-                                  onChange={(e) => updateSet(ex.$id, idx, { reps: e.target.value })}
+                                  onChange={(e) =>
+                                    updateSet(ex.$id, idx, {
+                                      reps: e.target.value,
+                                    })
+                                  }
                                   inputMode="numeric"
                                   placeholder="reps"
                                 />
                                 {v.errors.reps ? (
-                                  <div className="text-xs text-red-200">{v.errors.reps}</div>
+                                  <div className="text-xs text-red-200">
+                                    {v.errors.reps}
+                                  </div>
                                 ) : null}
                               </div>
                             </td>
@@ -655,15 +709,23 @@ export default function WorkoutRoute() {
                                 <HudInput
                                   className={[
                                     "w-24",
-                                    v.errors.rir ? "border-red-900/60 focus:border-red-700/60 focus:ring-red-600/20" : "",
+                                    v.errors.rir
+                                      ? "border-red-900/60 focus:border-red-700/60 focus:ring-red-600/20"
+                                      : "",
                                   ].join(" ")}
                                   value={row.rir}
-                                  onChange={(e) => updateSet(ex.$id, idx, { rir: e.target.value })}
+                                  onChange={(e) =>
+                                    updateSet(ex.$id, idx, {
+                                      rir: e.target.value,
+                                    })
+                                  }
                                   inputMode="numeric"
                                   placeholder="RIR"
                                 />
                                 {v.errors.rir ? (
-                                  <div className="text-xs text-red-200">{v.errors.rir}</div>
+                                  <div className="text-xs text-red-200">
+                                    {v.errors.rir}
+                                  </div>
                                 ) : null}
                               </div>
                             </td>
@@ -671,13 +733,19 @@ export default function WorkoutRoute() {
                             <td className="px-4 py-3">
                               <HudInput
                                 value={row.notes}
-                                onChange={(e) => updateSet(ex.$id, idx, { notes: e.target.value })}
+                                onChange={(e) =>
+                                  updateSet(ex.$id, idx, {
+                                    notes: e.target.value,
+                                  })
+                                }
                                 placeholder="optional"
                               />
 
                               <div className="mt-2 text-xs text-zinc-500">
                                 {v.completed ? (
-                                  <span className="text-emerald-200/90">✓ complete</span>
+                                  <span className="text-emerald-200/90">
+                                    ✓ complete
+                                  </span>
                                 ) : v.partial ? (
                                   <span className="text-red-200">incomplete</span>
                                 ) : (
@@ -692,7 +760,9 @@ export default function WorkoutRoute() {
                   </table>
 
                   {!setsByExercise[ex.$id]?.length ? (
-                    <div className="px-4 py-4 text-sm text-zinc-400">No sets configured for this exercise.</div>
+                    <div className="px-4 py-4 text-sm text-zinc-400">
+                      No sets configured for this exercise.
+                    </div>
                   ) : null}
                 </div>
               </Panel>
